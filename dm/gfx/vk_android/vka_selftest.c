@@ -42,7 +42,7 @@ static uint8_t *lib_make(size_t *size) {
     h->entry_count = NE; h->entry_off = (uint32_t)eo; h->bind_count = NB; h->bind_off = (uint32_t)bo; h->mod_count = NM; h->mod_off = (uint32_t)mo; h->blob_off = blo; h->blob_size = blob;
     dmsh_vk_entry *e = (dmsh_vk_entry *)(L + eo);
     e[0] = (dmsh_vk_entry){.key = K_VS, .stage = DMSH_VK_STAGE_VS, .mod_count = 1, .mod = 0, .bind = 0, .bind_count = 1, .flags = DMSH_VK_F_GL_DEPTH, .vin_mask = 3};
-    e[1] = (dmsh_vk_entry){.key = K_FS, .stage = DMSH_VK_STAGE_FS, .mod_count = 1, .mod = 1, .bind = 1, .bind_count = 3, .fout_mask = 1, .flags = DMSH_VK_F_ALPHA_TEST, .c1_off = (uint32_t)c1, .c1_len = 16};
+    e[1] = (dmsh_vk_entry){.key = K_FS, .stage = DMSH_VK_STAGE_FS, .mod_count = 1, .mod = 1, .bind = 1, .bind_count = 3, .fout_mask = 1, .flags = DMSH_VK_F_ALPHA_TEST, .c1_off = (uint32_t)(c1 / DMSH_VK_BLOB_UNIT), .c1_len = 16};
     e[2] = (dmsh_vk_entry){.key = K_CS, .stage = DMSH_VK_STAGE_CS, .mod_count = 1, .mod = 2, .bind = 4, .bind_count = 2, .local = {64, 1, 1}};
     dmsh_vk_bind *b = (dmsh_vk_bind *)(L + bo);
     b[0] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_CBUF, .desc = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .binding = 0, .count = 1, .reg = 0, .soff = 0xFFFF};
@@ -53,9 +53,9 @@ static uint8_t *lib_make(size_t *size) {
     b[5] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_SBUF, .desc = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .binding = 0, .count = 1, .reg = 0, .flags = DMSH_VK_BF_RW, .soff = 0xFFFF};
     b[4] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_DRVCB, .desc = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .binding = 1, .count = 1, .reg = 0, .soff = 0xFFFF};
     dmsh_vk_module *m = (dmsh_vk_module *)(L + mo);
-    m[0] = (dmsh_vk_module){(uint32_t)m0, sizeof SPV_TRI_VERT, sizeof SPV_TRI_VERT, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
-    m[1] = (dmsh_vk_module){(uint32_t)m1, sizeof SPV_TRI_FRAG, sizeof SPV_TRI_FRAG, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
-    m[2] = (dmsh_vk_module){(uint32_t)m2, sizeof SPV_FILL_COMP, sizeof SPV_FILL_COMP, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
+    m[0] = (dmsh_vk_module){(uint32_t)(m0 / DMSH_VK_BLOB_UNIT), sizeof SPV_TRI_VERT, sizeof SPV_TRI_VERT, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
+    m[1] = (dmsh_vk_module){(uint32_t)(m1 / DMSH_VK_BLOB_UNIT), sizeof SPV_TRI_FRAG, sizeof SPV_TRI_FRAG, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
+    m[2] = (dmsh_vk_module){(uint32_t)(m2 / DMSH_VK_BLOB_UNIT), sizeof SPV_FILL_COMP, sizeof SPV_FILL_COMP, DMSH_VK_MOD_BASE, DMSH_VK_CODEC_RAW, 0};
     memcpy(L + blo + m0, SPV_TRI_VERT, sizeof SPV_TRI_VERT); memcpy(L + blo + m1, SPV_TRI_FRAG, sizeof SPV_TRI_FRAG); memcpy(L + blo + m2, SPV_FILL_COMP, sizeof SPV_FILL_COMP);
     memcpy(L + blo + c1, TINT, sizeof TINT);
     return L;

@@ -34,14 +34,14 @@ static img_t make_lib(void) {
     h->entry_count = NE; h->entry_off = (uint32_t)eo; h->bind_count = NB; h->bind_off = (uint32_t)bo; h->mod_count = NM; h->mod_off = (uint32_t)mo; h->blob_off = blo; h->blob_size = blob;
     dmsh_vk_entry *e = (dmsh_vk_entry *)(L.p + eo);
     e[0] = (dmsh_vk_entry){.key = 0x0011223344556677ull, .stage = DMSH_VK_STAGE_VS, .mod_count = 1, .mod = 0, .bind = 0, .bind_count = 1, .vin_mask = 3, .flags = DMSH_VK_F_GL_DEPTH};
-    e[1] = (dmsh_vk_entry){.key = 0xa011223344556677ull, .stage = DMSH_VK_STAGE_FS, .mod_count = 1, .mod = 1, .bind = 1, .bind_count = 2, .c1_off = (uint32_t)c1o, .c1_len = 16, .fout_mask = 1};
+    e[1] = (dmsh_vk_entry){.key = 0xa011223344556677ull, .stage = DMSH_VK_STAGE_FS, .mod_count = 1, .mod = 1, .bind = 1, .bind_count = 2, .c1_off = (uint32_t)(c1o / DMSH_VK_BLOB_UNIT), .c1_len = 16, .fout_mask = 1};
     dmsh_vk_bind *b = (dmsh_vk_bind *)(L.p + bo);
     b[0] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_CBUF, .desc = 6, .binding = 0, .count = 1, .reg = 0, .soff = 0xFFFF};
     b[1] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_TEX, .desc = 1, .binding = 4 * 64, .count = 1, .reg = 1, .skind = DMSH_VK_KIND_SAMP_TEX, .sreg = 1, .dim = 1, .soff = 0};
     b[2] = (dmsh_vk_bind){.kind = DMSH_VK_KIND_C1, .desc = 6, .binding = 4 * 64 + 1, .count = 1, .reg = -1, .soff = 0xFFFF};
     dmsh_vk_module *m = (dmsh_vk_module *)(L.p + mo);
     m[0] = (dmsh_vk_module){.off = 0, .size = (uint32_t)raw, .stored = (uint32_t)raw, .codec = DMSH_VK_CODEC_RAW};
-    m[1] = (dmsh_vk_module){.off = (uint32_t)zo, .size = 256, .stored = sizeof ZMOD, .codec = DMSH_VK_CODEC_ZSTD};
+    m[1] = (dmsh_vk_module){.off = (uint32_t)(zo / DMSH_VK_BLOB_UNIT), .size = 256, .stored = sizeof ZMOD, .codec = DMSH_VK_CODEC_ZSTD};
     uint32_t hdr[5] = {0x07230203u, 0x00010300u, 0, 1, 0}; memcpy(L.p + blo, hdr, sizeof hdr);
     memcpy(L.p + blo + zo, ZMOD, sizeof ZMOD);
     for (int i = 0; i < 16; i++) L.p[blo + c1o + i] = (uint8_t)(0x40 + i);

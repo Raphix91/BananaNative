@@ -23,7 +23,7 @@ uint64_t vka_shlib_key(const uint8_t md[8]);   // the host's 8-byte program key 
 const dmsh_vk_entry *vka_shlib_find(const vka_shlib *L, uint64_t key);   // NULL = not in the library
 static inline const dmsh_vk_bind *vka_shlib_binds(const vka_shlib *L, const dmsh_vk_entry *e) { return L->bind + e->bind; }
 const dmsh_vk_module *vka_shlib_module(const vka_shlib *L, const dmsh_vk_entry *e, int variant);   // NULL = no module of that variant
-static inline const uint8_t *vka_shlib_c1(const vka_shlib *L, const dmsh_vk_entry *e) { return e->c1_len ? L->blob + e->c1_off : NULL; }
+static inline const uint8_t *vka_shlib_c1(const vka_shlib *L, const dmsh_vk_entry *e) { return e->c1_len ? L->blob + (uint64_t)e->c1_off * DMSH_VK_BLOB_UNIT : NULL; }
 // The module's SPIR-V words, decompressed when stored with zstd: malloc'd (the caller frees), *nbytes its size. NULL with err on a bad module
 uint32_t *vka_shlib_spirv(const vka_shlib *L, const dmsh_vk_module *m, size_t *nbytes, char *err, size_t errn);
 // A header string (chain, vk_chain, game, inputs: 16 bytes NUL padded) as a C string

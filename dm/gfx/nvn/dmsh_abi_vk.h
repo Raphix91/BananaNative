@@ -11,7 +11,10 @@
 // All integers little-endian. The replay maps the file and takes it only when its header names the DMSH_CHAIN and DMSH_VK_CHAIN it was compiled with
 #define DMSH_VK_LIB_FILE "dmsh_vk.lib"
 #define DMSH_VK_LIB_MAGIC 0x4B56534D     // "MSVK"
-#define DMSH_VK_LIB_VERSION 1
+#define DMSH_VK_LIB_VERSION 2
+// Format 2: a module's and an entry's c1 offsets in the blob count units of DMSH_VK_BLOB_UNIT bytes (every piece of the blob starts at one), so a blob may reach 64 GiB.
+// Format 1 counted bytes in the same 32-bit fields, which stops at 4 GiB: Pokemon Pokopia's 131,426 shaders make a blob of about 9.8 GB
+#define DMSH_VK_BLOB_UNIT 16
 #define DMSH_VK_DIR_PREFIX "v-"          // the library directory: v-<DMSH_VK_CHAIN>
 
 // Device answers the translator was given (Program.cs job keys subgroup_size / ssbo_align / gs_passthrough; android/SHADERS.md), also in the library header. A library built
@@ -145,7 +148,7 @@ typedef struct {
     uint32_t entry_count, entry_off;   // entries sorted by key
     uint32_t bind_count, bind_off;
     uint32_t mod_count, mod_off;
-    uint64_t blob_off, blob_size;      // module words and c1 bytes, offsets in the entries and modules relative to blob_off, 16-byte aligned
+    uint64_t blob_off, blob_size;      // module words and c1 bytes, offsets in the entries and modules relative to blob_off, in DMSH_VK_BLOB_UNIT units
     uint16_t subgroup_size;  // DMSH_VK_SUBGROUP_SIZE the modules were built for; 0 in an older library: 32
     uint16_t ssbo_align;     // DMSH_VK_SSBO_ALIGN the modules were built for; 0 in an older library: bind storage buffers at their exact address
     uint8_t reserved[12];
@@ -165,7 +168,7 @@ typedef struct {
     uint8_t fout_mask;       // colour targets written (output locations)
     uint8_t uint_mask;       // the DMSH_VK_MOD_UINT_MIXED module's unsigned integer targets (0: no such module; older libraries: always 0)
     uint32_t shared;         // compute shared memory bytes (the answer table's)
-    uint32_t c1_off;         // the c1 bytes, in the blob
+    uint32_t c1_off;         // the c1 bytes, in the blob (DMSH_VK_BLOB_UNIT units)
     uint32_t c1_len;
     uint32_t vin_mask;       // vertex inputs read, by location (NVN attribute index)
     uint32_t reserved[2];
@@ -189,7 +192,7 @@ typedef struct {
 } dmsh_vk_bind;
 
 typedef struct {
-    uint32_t off;            // the module's bytes in the blob (from blob_off)
+    uint32_t off;            // the module's bytes in the blob (from blob_off, DMSH_VK_BLOB_UNIT units)
     uint32_t size;           // SPIR-V bytes (decompressed)
     uint32_t stored;         // bytes in the blob
     uint8_t variant;         // DMSH_VK_MOD_*

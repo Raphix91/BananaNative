@@ -1647,7 +1647,14 @@ def spin_emit(g):
 spin_heads = sorted(spin_cand)
 
 def spin_heads_with_region(first, step):
-    return [T for T in spin_heads[first::step] if spin_region(T, spin_cand[T])]
+    """The heads in spin_heads[first::step] that have a region. The decode cache is emptied after each head: a job's heads lie step heads apart and share
+    few instructions, and each cached instruction (with its details) takes about 3.6 KB, so a cache kept over a whole module grew to gigabytes on a large one
+    (Pokémon Pokopia's main, rewritten in the app's own process on the phone: capstone's CS_ERR_MEM)"""
+    found = []
+    for T in spin_heads[first::step]:
+        if spin_region(T, spin_cand[T]): found.append(T)
+        spin_dec.clear()
+    return found
 
 def find_spin_regions():
     """spin_region for every candidate head that has one, in address order. Each job takes every nth head, so the slow stretches

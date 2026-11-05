@@ -1,0 +1,19 @@
+# What this game needs of an Android phone, for the launcher's readiness check (android/README.md "Readiness check"; the format in dm/games/README.md "Readiness rows").
+# <required|degraded> <TAB> <fact> <TAB> <at least> <TAB> <title>: <why>. Facts: what vka_readiness.c reports, ram_gib (ActivityManager totalMem in GiB) and android.sdk.
+# A table of its own, not game.tsv rows: game.tsv is part of a pack's rewrite key (pack_android.py rewrite_key), and a change here must not make packs stale.
+
+# Plays on the Mac (the note); not yet run on an Android phone
+status	bring-up
+
+# Memory: the profile takes Donkey Kong Bananza's 9 GB layout (game.tsv), not measured on this game; Donkey Kong Bananza keeps 6-8 GB in use on the 16 GB phone. Same floor until a phone run measures it (open)
+required	ram_gib	10	Memory: the game is given the Switch 2's 9 GB; a phone with less than about 12 GB cannot give it that
+degraded	ram_gib	14	Memory: not yet run on a phone; with less than 16 GB, Android may stop the game when memory runs short
+
+# The shader facts (shader_facts.tsv, 3,156 compute shaders): 256 take more than Vulkan's minimum of 16 KiB of shared memory, 160 more than the tested phone's 32,768
+# (Adreno 840), the largest 48,128 bytes. Degraded, not required, as Mario Kart World's 48 KiB shaders: what those dispatches do above the limit is not measured yet (open)
+degraded	limit.maxComputeSharedMemorySize	48128	Compute shared memory: 160 of the game's compute shaders take up to 47 KiB, more than this GPU's limit, and what that leaves out is not measured yet
+required	feature.textureCompressionBC	1	BC compressed textures: the game's textures are sampled as they are, never decoded on the CPU
+required	feature.textureCompressionASTC_LDR	1	ASTC compressed textures: the game's textures are sampled as they are, never decoded on the CPU
+
+# The other features its shader library needs (geometry shaders, storage images without a format, draw parameters: android/SHADERS.md) are read from the built Vulkan
+# library, which has not been built for this game yet: no rows until it has (open)

@@ -579,7 +579,7 @@ public final class MainActivity extends Activity {
         Ui.sheet(this, "Overlay", box).setPositiveButton("Done", null).setOnDismissListener(d -> refreshSettings()).show();
     }
 
-    private String resLabel() { int i = java.util.Arrays.asList(Prefs.WINDOWS).indexOf(Prefs.window(this)); return i == 1 ? "Original" : "1080p"; }
+    private String resLabel() { return Prefs.windowShort(Prefs.window(this)); }
 
     /** Game resolution: the window size the host gives the game (DM_WINDOW), from the next start */
     private void gameRes() {

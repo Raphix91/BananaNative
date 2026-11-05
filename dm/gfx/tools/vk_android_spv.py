@@ -423,6 +423,72 @@ def precise_minmax(m):
     return n
 
 
+OP_ATOMIC_IADD, OP_ATOMIC_ISUB, OP_ATOMIC_OR, OP_ATOMIC_XOR = 234, 235, 241, 242   # zero leaves memory as it is
+OP_PTR_ACCESS_CHAIN, OP_CONVERT_U_TO_PTR, OP_INOT_EQUAL, OP_PHI = 67, 120, 171, 245
+OP_LOOP_MERGE, OP_SELECTION_MERGE, OP_BRANCH, OP_BRANCH_CONDITIONAL = 246, 247, 249, 250
+SC_WORKGROUP, SC_PHYSICAL_STORAGE_BUFFER = 4, 5349
+SEM_ORDER = 0x1e   # Acquire | Release | AcquireRelease | SequentiallyConsistent
+
+
+def skip_zero_reductions(m):
+    """Global reductions whose operand is zero are skipped (Maxwell's RED.ADD / OR / XOR, which return nothing: the translator stores their result in a variable no one
+    reads). A luminance histogram adds every workgroup's count of each bin to the global bins, most of them zero (Pokemon Pokopia's 2118ab534fac88c6: 8,160 workgroups x 64
+    bins a frame); on the Adreno 830 with Turnip those atomics on the guest's memory took 13.6 ms of a 15 ms frame. An add, or, xor of zero changes nothing, and a relaxed one
+    orders nothing, so `if (v != 0)` around it is exact. Only 32-bit relaxed atomics on buffer memory (Uniform, StorageBuffer, PhysicalStorageBuffer: not workgroup memory,
+    which is cheap) whose result has no reader besides stores to function variables that are never read; those stores go, the atomic moves into a new block
+    (OpSelectionMerge / OpBranchConditional), and the rest of its block into the merge block, which inherits the block's OpPhi edges. Not in a loop header (its back edge
+    names the header). → atomics guarded"""
+    atomics = (OP_ATOMIC_IADD, OP_ATOMIC_ISUB, OP_ATOMIC_OR, OP_ATOMIC_XOR)
+    if not any(x[0] & 0xffff in atomics for x in m.ins): return 0
+    ptr_type = {x[2]: x[1] for x in m.ins if x[0] & 0xffff in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_ACCESS_CHAIN, OP_PTR_ACCESS_CHAIN, OP_VARIABLE, OP_CONVERT_U_TO_PTR,
+                                                                   OP_BITCAST, OP_COPY_OBJECT) and len(x) > 2}
+    uses = m.uses()
+    def unread(var):   # a function variable that only stores reach (its declaration, names and stores aside)
+        return m.vars.get(var, (None, None))[1] == SC_FUNCTION and \
+            all(m.ins[u][0] & 0xffff in (OP_VARIABLE, OP_NAME, OP_DECORATE) or (m.ins[u][0] & 0xffff == OP_STORE and m.ins[u][1] == var) for u in uses.get(var, []))
+    picked = []   # the atomic instructions to guard, with the dead stores of their results
+    for k, x in enumerate(m.ins):
+        if x[0] & 0xffff not in atomics or len(x) != 7: continue
+        rtype, res, ptr, _scope, sem, _val = x[1:7]
+        if (m.int_type(rtype) or (0,))[0] != 32: continue
+        pt = ptr_type.get(ptr)
+        if pt is None or m.op(pt) != OP_TYPE_POINTER or m.pointee(pt)[0] not in (SC_UNIFORM, SC_STORAGE_BUFFER, SC_PHYSICAL_STORAGE_BUFFER): continue
+        s = const_int(m, sem)
+        if s is None or s & SEM_ORDER: continue
+        rest = [m.ins[u] for u in uses.get(res, []) if u != k]
+        if not all(y[0] & 0xffff == OP_STORE and y[2] == res and unread(y[1]) for y in rest): continue
+        lab = next(j for j in range(k, -1, -1) if m.ins[j][0] & 0xffff == OP_LABEL)
+        if lab == k - 1 and m.ins[lab - 1][0] & 0xffff == OP_BRANCH_CONDITIONAL and m.ins[lab - 1][2] == m.ins[lab][1] and \
+                m.ins[lab - 3][0] & 0xffff == OP_INOT_EQUAL and m.ins[lab - 3][2] == m.ins[lab - 1][1] and m.ins[lab - 3][3] == x[6]: continue   # guarded already
+        end = next(j for j in range(k, len(m.ins)) if m.ins[j][0] & 0xffff in (OP_BRANCH, OP_BRANCH_CONDITIONAL, 251, 252, 253, 254, 255, 4416, 5380))
+        if any(m.ins[j][0] & 0xffff == OP_LOOP_MERGE for j in range(lab, end)): continue
+        picked.append((x, rest))
+    if not picked: return 0
+    boolean = m.add_type(OP_TYPE_BOOL)
+    zeros = {x[1]: m.add_const(x[1], 0) for x, _ in picked}
+    dead = {id(y) for _, rest in picked for y in rest}
+    guard = {id(x) for x, _ in picked}
+    out, cur, relabel = [], None, {}
+    for x in m.ins:
+        if id(x) in dead: continue
+        if x[0] & 0xffff == OP_LABEL: cur = x[1]
+        if id(x) in guard:
+            cond, then, merge = m.new_id(), m.new_id(), m.new_id()
+            out += [[5 << 16 | OP_INOT_EQUAL, boolean, cond, x[6], zeros[x[1]]], [3 << 16 | OP_SELECTION_MERGE, merge, 0], [4 << 16 | OP_BRANCH_CONDITIONAL, cond, then, merge],
+                    [2 << 16 | OP_LABEL, then], x, [2 << 16 | OP_BRANCH, merge], [2 << 16 | OP_LABEL, merge]]
+            relabel[cur] = merge; cur = merge   # the rest of the block, and its terminator, are in the merge block now
+            continue
+        out.append(x)
+    def last(b):   # a block split more than once: its successors come from the last merge block
+        while b in relabel: b = relabel[b]
+        return b
+    for y in out:   # OpPhi edges from the split blocks
+        if y[0] & 0xffff == OP_PHI:
+            for p in range(4, len(y), 2): y[p] = last(y[p])
+    m.ins = out
+    return len(picked)
+
+
 def const_int(m, ident):
     c = m.consts.get(ident)
     return c[1][0] if c and m.int_type(c[0]) else None

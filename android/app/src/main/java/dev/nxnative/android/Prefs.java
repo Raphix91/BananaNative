@@ -25,8 +25,17 @@ final class Prefs {
     static boolean overlayItem(Context c, String key) { return of(c).getBoolean("overlay_" + key, true); }
     static void overlayItem(Context c, String key, boolean on) { of(c).edit().putBoolean("overlay_" + key, on).commit(); }
 
-    /** The game's window size (Game resolution): DM_WINDOW_SIZE for the host (loader.c window_apply), "1920x1080" (Phone 1080p, the default) or "original" (the game's own, 2880x1620 in Donkey Kong Bananza). DM_WINDOW_SIZE in env.txt overrides it for a run. */
-    static final String[] WINDOWS = {"1920x1080", "original"}, WINDOW_NAMES = {"Phone 1080p (1920x1080)", "Original (the game's own size)"};
+    /** The game's window size (Game resolution): DM_WINDOW_SIZE for the host (loader.c window_apply), "1920x1080" (Phone 1080p, the default) or "original" (the game's own, 2880x1620 in Donkey Kong Bananza),
+     *  or a smaller size; a game with dynamic resolution and no window getter (profile key res_levels: Pokemon Pokopia) takes it as a cap on its render size (loader.c levels_apply).
+     *  The first two keep their places: a stored value is the string, the dialogs list them in this order. DM_WINDOW_SIZE in env.txt overrides it for a run. */
+    static final String[] WINDOWS = {"1920x1080", "original", "1600x900", "1280x720", "960x540"},
+            WINDOW_NAMES = {"Phone 1080p (1920x1080)", "Original (the game's own size)", "900p (1600x900): faster, less detail", "720p (1280x720): faster still", "540p (960x540): fastest, blurry"};
+    /** Short label of a window size for the settings rows */
+    static String windowShort(String v) {
+        switch (v) { case "original": return "Original"; case "1600x900": return "900p"; case "1280x720": return "720p"; case "960x540": return "540p"; default: return "1080p"; }
+    }
+    /** The full name of a window size, the first one for an unknown string */
+    static String windowName(String v) { int i = java.util.Arrays.asList(WINDOWS).indexOf(v); return WINDOW_NAMES[Math.max(0, i)]; }
     static String window(Context c) { return of(c).getString("window", WINDOWS[0]); }
     static void window(Context c, String v) { of(c).edit().putString("window", v).commit(); }
 

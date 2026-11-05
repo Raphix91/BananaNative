@@ -257,7 +257,8 @@ def locate(keys, loc, files, skey):
 def check_library(path, validator, nj):
     """Read a library back as the replay does (dmsh_abi_vk.h): the header, entries sorted by key, every binding and module in range, each module decompressed to SPIR-V of
     its recorded size and valid for spirv-val --target-env vulkan1.3. → [problems]"""
-    d = open(path, 'rb').read(); bad = []
+    with open(path, 'rb') as f: d = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)   # mapped as the replay does: a large game's library is several GB
+    bad = []; U = VK['BLOB_UNIT']
     magic, version, chain, vkc, game, inputs, ne, eo, nb, bo, nm, mo, blob_off, blob_size, sg, sa = struct.unpack_from('<II16s16s16s16sIIIIIIQQHH', d, 0)
     if magic != VK['LIB_MAGIC'] or version != VK['LIB_VERSION']: return [f'magic {magic:#x} version {version}']
     if blob_off + blob_size != len(d): bad.append('blob does not end the file')
@@ -270,7 +271,7 @@ def check_library(path, validator, nj):
         vs = [struct.unpack_from('<IIIBBH', d, mo + VK['MOD_SIZE'] * j)[3] for j in range(m0, m0 + mc)]
         if not vs or vs[0] != VK['MOD_BASE'] or len(set(vs)) != len(vs): bad.append(f'{key:016x}: modules {vs}: the base module first, each variant once')
         for j in range(m0, m0 + mc):
-            off, size, stored, variant, codec, _ = struct.unpack_from('<IIIBBH', d, mo + VK['MOD_SIZE'] * j)
+            off, size, stored, variant, codec, _ = struct.unpack_from('<IIIBBH', d, mo + VK['MOD_SIZE'] * j); off *= U
             if off + stored > blob_size: bad.append(f'{key:016x}: module out of the blob'); continue
             jobs_.append((f'{key:016x}_{variant}', d[blob_off + off:blob_off + off + stored], size, codec))
     def one(job):
@@ -556,6 +557,7 @@ def finish(key, w, job, c1):
     if stage == 'ms':   # the translator adds the constant itself (job gl_depth_spec: a mesh program may not read its outputs back)
         gl = any(d.get(spv.DEC_SPEC_ID) == [VK['SPEC_GL_DEPTH']] for d in m.decos.values())
     alpha = stage == 'ps' and spv.alpha_test(m, VK['SPEC_ALPHA_FUNC'])
+    spv.skip_zero_reductions(m)   # the last rewrite of the base module: global reductions of zero skipped (the Adreno's atomics on guest memory)
     mods = [(VK['MOD_BASE'], m.data())]
     uint_mask = 0
     if stage == 'ps':   # the variants of the same module (dmsh_abi_vk.h DMSH_VK_MOD_*)
@@ -616,14 +618,30 @@ def pack_module(data):
     return (c, VK['CODEC_ZSTD']) if len(c) < len(data) else (data, VK['CODEC_RAW'])
 
 
+class Stored:
+    """A module's stored bytes left in its result file until the library is written: a large game's modules (Pokemon Pokopia's, about 10 GB) are never all in memory"""
+    __slots__ = ('path', 'off', 'n')
+    def __init__(self, path, off, n): self.path, self.off, self.n = path, off, n
+    def __len__(self): return self.n
+    def read(self):
+        with open(self.path, 'rb') as f:
+            f.seek(self.off); d = f.read(self.n)
+        if len(d) != self.n: sys.exit(f'[RED] {self.path} changed while the library was written: run again')
+        return d
+
+
 def write_library(results):
-    """dmsh_vk.lib: header, entries sorted by key, binding records, module records, blob (dmsh_abi_vk.h)"""
+    """dmsh_vk.lib: header, entries sorted by key, binding records, module records, blob (dmsh_abi_vk.h). The tables are made first with each blob piece's place (offsets in
+    DMSH_VK_BLOB_UNIT units), then the pieces are written one by one at those places"""
     ok = sorted(((k, r) for k, st, _, r in results if st == 'ok'), key=lambda x: key_int(x[0]))
-    entries, binds, mods = bytearray(), bytearray(), bytearray(); blob = bytearray()
+    entries, binds, mods = bytearray(), bytearray(), bytearray(); pieces = []; blen = 0
     nb = nm = 0
+    U = VK['BLOB_UNIT']
     def put(b):
-        nonlocal blob
-        blob += b'\0' * (-len(blob) % 16); off = len(blob); blob += b; return off
+        nonlocal blen
+        blen += -blen % U; off = blen; pieces.append((off, b)); blen += len(b)
+        if off // U > 0xFFFFFFFF: sys.exit(f'[RED] the library blob passes {0xFFFFFFFF * U >> 30} GiB, the most dmsh_abi_vk.h format {VK["LIB_VERSION"]} addresses')
+        return off // U
     for key, (refl, modules) in ok:
         c1 = bytes.fromhex(refl['c1']); c1_off = put(c1) if c1 else 0
         b0, m0 = nb, nm
@@ -642,12 +660,18 @@ def write_library(results):
     hs = VK['HEADER_SIZE']; eo = hs; bo = eo + len(entries); mo = bo + len(binds); blob_off = (mo + len(mods) + 15) // 16 * 16
     pad = lambda s: s.encode()[:16].ljust(16, b'\0')   # NUL padded; a 16-character value (a title ID) has no terminator
     head = struct.pack('<II16s16s16s16sIIIIIIQQHH12x', VK['LIB_MAGIC'], VK['LIB_VERSION'], pad(CHAIN), pad(VKV), pad(GAME.id), pad(INPUTS),
-                       len(ok), eo, nb, bo, nm, mo, blob_off, len(blob), ANSWERS['subgroup_size'], ANSWERS['ssbo_align'])
+                       len(ok), eo, nb, bo, nm, mo, blob_off, blen, ANSWERS['subgroup_size'], ANSWERS['ssbo_align'])
     assert len(head) == hs and len(entries) == len(ok) * VK['ENTRY_SIZE'] and len(binds) == nb * VK['BIND_SIZE'] and len(mods) == nm * VK['MOD_SIZE']
-    data = head + entries + binds + mods; data += b'\0' * (blob_off - len(data)) + blob
+    data = head + entries + binds + mods; data += b'\0' * (blob_off - len(data))
     path = os.path.join(out, VK['LIB_FILE']); tmp = path + '.tmp'
-    open(tmp, 'wb').write(data); os.replace(tmp, path)
-    return path, len(data)
+    with open(tmp, 'wb') as f:
+        f.write(data); pos = 0
+        for off, b in pieces:
+            b = b.read() if isinstance(b, Stored) else b
+            f.write(b'\0' * (off - pos)); f.write(b); pos = off + len(b)
+        assert pos == blen and f.tell() == blob_off + blen
+    os.replace(tmp, path)
+    return path, blob_off + blen
 
 
 # ---- the build
@@ -699,9 +723,10 @@ def read_result(key):
     if not h['refl']: return key, h['st'], h['err'], None
     mods, loose = [], os.environ.get('DMSH_VK_LOOSE') == '1'
     for variant, size, ln, codec in h['modules']:
-        stored = d[o:o + ln]; o += ln
+        stored = d[o:o + ln]
         if len(stored) != ln: sys.exit(f'[RED] {result_path(key)} is cut short: delete it and run again')
-        mods.append((variant, size, stored, codec, (zstd.decompress(stored) if codec == VK['CODEC_ZSTD'] else stored) if loose else None))
+        mods.append((variant, size, stored if loose else Stored(result_path(key), o, ln), codec, (zstd.decompress(stored) if codec == VK['CODEC_ZSTD'] else stored) if loose else None))
+        o += ln
     return key, h['st'], h['err'], (h['refl'], mods)
 
 

@@ -43,7 +43,7 @@ final class GameSettings {
 
     static String windowLabel(MainActivity a, String id) {
         String w = Prefs.gameWindow(a, id);
-        String l = w.equals(Prefs.WINDOWS[1]) ? Prefs.WINDOW_NAMES[1] : w.equals(Prefs.WINDOWS[0]) ? Prefs.WINDOW_NAMES[0] : w;
+        String l = Arrays.asList(Prefs.WINDOWS).contains(w) ? Prefs.windowName(w) : w;
         return Prefs.ownWindow(a, id) ? l : "Default · " + l;
     }
 
@@ -60,7 +60,7 @@ final class GameSettings {
 
     private static void resolution(MainActivity a, Game g, Runnable done) {
         String[] labels = new String[Prefs.WINDOWS.length + 1];
-        labels[0] = "Default (the main screen's: " + (Prefs.window(a).equals(Prefs.WINDOWS[1]) ? Prefs.WINDOW_NAMES[1] : Prefs.WINDOW_NAMES[0]) + ")";
+        labels[0] = "Default (the main screen's: " + Prefs.windowName(Prefs.window(a)) + ")";
         System.arraycopy(Prefs.WINDOW_NAMES, 0, labels, 1, Prefs.WINDOW_NAMES.length);
         int checked = Prefs.ownWindow(a, g.titleId) ? 1 + Math.max(0, Arrays.asList(Prefs.WINDOWS).indexOf(Prefs.gameWindow(a, g.titleId))) : 0;
         new AlertDialog.Builder(a).setTitle("Game resolution · " + g.name).setSingleChoiceItems(labels, checked, (x, w) -> {

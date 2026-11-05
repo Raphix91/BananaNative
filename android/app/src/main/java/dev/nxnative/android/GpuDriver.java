@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 /**
@@ -171,12 +172,14 @@ final class GpuDriver {
         return out;
     }
 
+    /** Whether a zip holds a meta.json, from its central directory: a ZipInputStream read every entry to the end, so a large zip in Download/ (a game dump, a ROM
+     *  archive) took minutes, on the screen's thread when the Install dialog opened (the app froze) */
     private static boolean hasMeta(File zip) {
         if (zip.length() > 512L << 20) return false;
-        try (ZipInputStream z = new ZipInputStream(new FileInputStream(zip))) {
-            ZipEntry e;
-            while ((e = z.getNextEntry()) != null) if (new File(e.getName()).getName().equals("meta.json")) return true;
-        } catch (IOException | SecurityException e) { return false; }
+        try (ZipFile z = new ZipFile(zip)) {
+            for (java.util.Enumeration<? extends ZipEntry> en = z.entries(); en.hasMoreElements(); )
+                if (new File(en.nextElement().getName()).getName().equals("meta.json")) return true;
+        } catch (IOException | SecurityException | IllegalArgumentException e) { return false; }
         return false;
     }
 
@@ -216,27 +219,42 @@ final class GpuDriver {
                 .setNegativeButton("Cancel", null).show();
     }
 
+    /** The zips on the phone are looked for, and a driver unpacked, on a thread of their own (file reads; the screen's thread only shows the dialogs) */
     private static void installDialog(Activity a, int request) {
-        List<File> zips = found(a);
-        List<String> labels = new ArrayList<>();
-        for (File f : zips) labels.add(f.getName() + "  (" + f.getParentFile().getName() + ")");
-        labels.add("Pick a zip…");
-        labels.add("Download…");   // DriverFetch: GitHub releases, only on a tap
-        new AlertDialog.Builder(a).setTitle("Install a driver zip (with meta.json)")
-                .setItems(labels.toArray(new String[0]), (d, w) -> {
-                    if (w == zips.size() + 1) { DriverFetch.dialog(a, request); return; }
-                    if (w == zips.size()) {
-                        a.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip"), request);
-                        return;
-                    }
-                    try { Info i = install(a, zips.get(w)); select(a, i); Toast.makeText(a, "Installed and picked " + i.label(), Toast.LENGTH_LONG).show(); }
-                    catch (IOException | SecurityException e) { Toast.makeText(a, "Not installed: " + e.getMessage(), Toast.LENGTH_LONG).show(); }
-                }).setNegativeButton("Cancel", null).show();
+        new Thread(() -> {
+            List<File> zips = found(a);
+            a.runOnUiThread(() -> {
+                if (a.isFinishing() || a.isDestroyed()) return;
+                List<String> labels = new ArrayList<>();
+                for (File f : zips) labels.add(f.getName() + "  (" + f.getParentFile().getName() + ")");
+                labels.add("Pick a zip…");
+                labels.add("Download…");   // DriverFetch: GitHub releases, only on a tap
+                new AlertDialog.Builder(a).setTitle("Install a driver zip (with meta.json)")
+                        .setItems(labels.toArray(new String[0]), (d, w) -> {
+                            if (w == zips.size() + 1) { DriverFetch.dialog(a, request); return; }
+                            if (w == zips.size()) {
+                                a.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip"), request);
+                                return;
+                            }
+                            File zip = zips.get(w);
+                            installAsync(a, () -> install(a, zip));
+                        }).setNegativeButton("Cancel", null).show();
+            });
+        }, "gpu-driver-zips").start();
+    }
+
+    private interface Installer { Info run() throws IOException; }
+
+    private static void installAsync(Activity a, Installer job) {
+        new Thread(() -> {
+            String msg;
+            try { Info i = job.run(); select(a, i); msg = "Installed and picked " + i.label(); }
+            catch (IOException | SecurityException e) { msg = "Not installed: " + e.getMessage(); }
+            String m = msg;
+            a.runOnUiThread(() -> Toast.makeText(a, m, Toast.LENGTH_LONG).show());
+        }, "gpu-driver-install").start();
     }
 
     /** The picker's result (MainActivity.onActivityResult) */
-    static void picked(Activity a, Uri uri) {
-        try { Info i = install(a, uri); select(a, i); Toast.makeText(a, "Installed and picked " + i.label(), Toast.LENGTH_LONG).show(); }
-        catch (IOException | SecurityException e) { Toast.makeText(a, "Not installed: " + e.getMessage(), Toast.LENGTH_LONG).show(); }
-    }
+    static void picked(Activity a, Uri uri) { installAsync(a, () -> install(a, uri)); }
 }
